@@ -1,8 +1,8 @@
 [project]
-name = "agent-template"
+name = "helpdesk-agent"
 version = "0.1.0"
 description = "Minimal Python agent service template for ArchAI."
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 dependencies = [
   "fastapi>=0.116.0",
   "uvicorn[standard]>=0.35.0",
@@ -20,23 +20,35 @@ dev = [
   "ruff>=0.12.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+  "bandit>=1.8.0",
+  "hatchling>=1.28.0",
+  "httpx>=0.28.0",
+  "mypy>=1.16.0",
+  "pip-audit>=2.9.0",
+  "pytest>=8.4.0",
+  "pytest-cov>=6.2.0",
+  "ruff>=0.12.0",
+]
+
 [project.scripts]
-agent-template = "agent_template.main:main"
+helpdesk-agent = "helpdesk_agent.main:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/agent_template"]
-artifacts = ["src/agent_template/py.typed"]
+packages = ["src/helpdesk_agent"]
+artifacts = ["src/helpdesk_agent/py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 120
-target-version = "py312"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "BLE", "UP", "S"]
@@ -46,12 +58,12 @@ ignore = [
 ]
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.10"
 strict = true
-packages = ["agent_template"]
+packages = ["helpdesk_agent"]
 
 [tool.coverage.run]
-source = ["agent_template"]
+source = ["helpdesk_agent"]
 branch = true
 
 [tool.coverage.report]
