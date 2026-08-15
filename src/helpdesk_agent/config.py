@@ -1,6 +1,11 @@
 import os
 from dataclasses import dataclass, field
 
+from dotenv import load_dotenv
+
+# Load environment variables from .env file if present
+load_dotenv()
+
 
 @dataclass
 class MCPConfig:

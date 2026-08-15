@@ -50,6 +50,15 @@ The agent follows this flow for incoming emails:
 
 ## Configuration
 
+Configuration is read from environment variables. The app automatically loads a `.env` file from the project root (via `python-dotenv`) if present.
+
+```bash
+cp .env.example .env
+# edit .env with your values
+```
+
+`.env` is git-ignored; `.env.example` documents all available settings.
+
 ### Required
 
 - `HELPDESK_AGENT_LLM_API_KEY` - OpenAI API key (required)
