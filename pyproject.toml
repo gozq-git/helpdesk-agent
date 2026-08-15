@@ -67,6 +67,9 @@ python_version = "3.10"
 strict = true
 packages = ["helpdesk_agent"]
 
+[tool.vercel]
+entrypoint = "helpdesk_agent.main:create_app"
+
 [tool.coverage.run]
 source = ["helpdesk_agent"]
 branch = true

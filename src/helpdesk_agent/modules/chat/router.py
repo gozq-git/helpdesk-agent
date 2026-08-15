@@ -48,14 +48,34 @@ async def chat(
                 agent_response += f"\n{i}. {msg.get('subject', 'No Subject')} from {msg.get('from', 'Unknown')}"
         else:
             agent_response = "No unread emails found."
+    elif state.current_step == "awaiting_clarification":
+        clarification = state.clarification or {}
+        questions = clarification.get("questions", [])
+        missing_info = clarification.get("missing_info", [])
+        if questions:
+            agent_response = "I need some more information to help with your request:\n"
+            agent_response += "\n".join(f"- {q}" for q in questions)
+        else:
+            agent_response = "I need more details about your request. Could you describe the issue in more detail?"
+        if missing_info:
+            agent_response += f"\n\nMissing information: {', '.join(missing_info)}"
+    elif state.current_step == "resolved_faq":
+        faq_matches = state.faq_matches or []
+        if faq_matches:
+            top = faq_matches[0]
+            agent_response = (
+                f"I found a solution that may help:\n\n**{top.get('title', 'FAQ')}**\n\n{top.get('body', '')}"
+            )
+        else:
+            agent_response = "Your request was resolved via our knowledge base."
     else:
-        agent_response = f"Case {state.case_id} created. Current step: {state.current_step}. "
+        agent_response = f"Case {state.case_id}. Current step: {state.current_step}. "
         if state.ticket:
             agent_response += f"Ticket: {state.ticket.get('ticket_id', 'N/A')}. "
         if state.current_step == "approval":
             agent_response += "Awaiting approval."
-        else:
-            agent_response += "Case processed and ready for investigation."
+        elif state.current_step == "closed":
+            agent_response += "Your case has been processed and closed."
 
     conv.add_agent_message(agent_response, {"case_id": state.case_id, "state": state.to_dict()})
 
@@ -66,6 +86,7 @@ async def chat(
         metadata={
             "current_step": state.current_step,
             "ticket_id": state.ticket.get("ticket_id") if state.ticket else None,
+            "clarifying_questions": (state.clarification or {}).get("questions", []),
         },
     )
 
