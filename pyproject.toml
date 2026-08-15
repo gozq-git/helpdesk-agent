@@ -68,7 +68,7 @@ strict = true
 packages = ["helpdesk_agent"]
 
 [tool.vercel]
-entrypoint = "helpdesk_agent.main:create_app"
+entrypoint = "main:app"
 
 [tool.coverage.run]
 source = ["helpdesk_agent"]
