@@ -1,7 +1,6 @@
 import unittest
-from unittest.mock import MagicMock, patch
 
-from helpdesk_agent.chat import Conversation, ConversationStore
+from helpdesk_agent.modules.chat.service import Conversation, ConversationStore
 
 
 class TestConversation(unittest.TestCase):
@@ -43,7 +42,7 @@ class TestConversationStore(unittest.TestCase):
 
     def test_get_conversation(self) -> None:
         store = ConversationStore()
-        conv = store.create("test-id")
+        store.create("test-id")
         retrieved = store.get("test-id")
         self.assertIsNotNone(retrieved)
         self.assertEqual(retrieved.conversation_id, "test-id")
@@ -68,7 +67,7 @@ class TestConversationStore(unittest.TestCase):
 
     def test_delete_conversation(self) -> None:
         store = ConversationStore()
-        conv = store.create("test-id")
+        store.create("test-id")
         result = store.delete("test-id")
         self.assertTrue(result)
         self.assertNotIn("test-id", store.conversations)

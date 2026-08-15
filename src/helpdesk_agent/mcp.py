@@ -1,35 +1,34 @@
 from __future__ import annotations
 
-import json
-import urllib.request
-import urllib.error
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any
 from uuid import uuid4
+
+import httpx
 
 from .config import MCPConfig
 
 
 @dataclass
 class MCPResponse:
-    action_id: Optional[str]
+    action_id: str | None
     status: str
-    content: Dict[str, Any]
-    error: Optional[str] = None
+    content: dict[str, Any]
+    error: str | None = None
 
 
 class MCPProxyAdapter:
-    def __init__(self, config: Optional[MCPConfig] = None) -> None:
+    def __init__(self, config: MCPConfig | None = None) -> None:
         self.config = config or MCPConfig()
 
-    def call_tool(
+    async def call_tool(
         self,
         tool_name: str,
-        arguments: Optional[Dict[str, Any]] = None,
+        arguments: dict[str, Any] | None = None,
         *,
-        correlation_id: Optional[str] = None,
-        idempotency_key: Optional[str] = None,
-        policy: Optional[Dict[str, Any]] = None,
+        correlation_id: str | None = None,
+        idempotency_key: str | None = None,
+        policy: dict[str, Any] | None = None,
         wait_for_completion: bool = True,
     ) -> MCPResponse:
         payload = {
@@ -45,7 +44,7 @@ class MCPProxyAdapter:
                 "wait_for_completion": wait_for_completion,
             },
         }
-        result = self._request(payload)
+        result = await self._request(payload)
         if isinstance(result, dict) and "error" in result:
             return MCPResponse(action_id=None, status="failed", content={}, error=result["error"])
 
@@ -57,14 +56,14 @@ class MCPProxyAdapter:
             error=data.get("error"),
         )
 
-    def get_action_status(self, action_id: str) -> MCPResponse:
+    async def get_action_status(self, action_id: str) -> MCPResponse:
         request_payload = {
             "jsonrpc": "2.0",
             "id": str(uuid4()),
             "method": "actions/get",
             "params": {"action_id": action_id},
         }
-        result = self._request(request_payload)
+        result = await self._request(request_payload)
         if isinstance(result, dict) and "error" in result:
             return MCPResponse(action_id=action_id, status="failed", content={}, error=result["error"])
         data = result.get("result", {}) if isinstance(result, dict) else {}
@@ -75,20 +74,21 @@ class MCPProxyAdapter:
             error=data.get("error"),
         )
 
-    def _request(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        body = json.dumps(payload).encode("utf-8")
+    async def _request(self, payload: dict[str, Any]) -> dict[str, Any]:
         headers = {"Content-Type": "application/json", **self.config.headers}
-        request = urllib.request.Request(
-            self.config.base_url,
-            data=body,
-            headers=headers,
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=self.config.timeout_seconds) as response:
-                content = response.read().decode("utf-8")
-                return json.loads(content)
-        except urllib.error.HTTPError as exc:  # pragma: no cover - exercised in integration tests if server unavailable
-            raise RuntimeError(f"MCP request failed with HTTP {exc.code}: {exc.read().decode('utf-8', 'ignore')}") from exc
-        except urllib.error.URLError as exc:
-            raise RuntimeError(f"MCP request failed: {exc.reason}") from exc
+        async with httpx.AsyncClient(timeout=self.config.timeout_seconds) as client:
+            try:
+                response = await client.post(
+                    self.config.base_url,
+                    json=payload,
+                    headers=headers,
+                )
+                response.raise_for_status()
+                result: dict[str, Any] = response.json()
+                return result
+            except httpx.HTTPStatusError as exc:
+                raise RuntimeError(
+                    f"MCP request failed with HTTP {exc.response.status_code}: {exc.response.text}"
+                ) from exc
+            except httpx.RequestError as exc:
+                raise RuntimeError(f"MCP request failed: {exc}") from exc

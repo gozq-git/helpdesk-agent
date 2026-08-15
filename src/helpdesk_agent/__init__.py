@@ -1,12 +1,11 @@
-from .chat import Conversation, ConversationStore
 from .config import MCPConfig
-from .gmail_flow import GmailFlow
-from .models import WorkflowState
+from .core.workflow import HelpdeskWorkflow
 from .mcp import MCPProxyAdapter, MCPResponse
-from .slack_flow import SlackApprovalFlow
-from .ticketing import JiraTicketFlow
-from .triage import TriageParser
-from .workflow import HelpdeskWorkflow
+from .models import WorkflowState
+from .modules.approval.service import SlackApprovalFlow
+from .modules.chat.service import Conversation, ConversationStore
+from .modules.email.service import GmailFlow
+from .modules.ticketing.service import JiraTicketFlow
 
 __all__ = [
     "MCPConfig",
@@ -18,6 +17,5 @@ __all__ = [
     "GmailFlow",
     "SlackApprovalFlow",
     "JiraTicketFlow",
-    "TriageParser",
     "HelpdeskWorkflow",
 ]

@@ -3,13 +3,39 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from fastapi.testclient import TestClient
 
-from helpdesk_agent.main import create_app
-
 
 class TestChatEndpoint(unittest.TestCase):
     def setUp(self) -> None:
+        # Mock the LLM client to avoid requiring API key
+        self.mock_patcher = patch("helpdesk_agent.dependencies.get_llm_client")
+        mock_get_llm = self.mock_patcher.start()
+
+        from helpdesk_agent.modules.triage.schema import TriageResult
+
+        mock_llm = MagicMock()
+        mock_llm.triage_email = AsyncMock(
+            return_value=TriageResult(
+                service="identity",
+                issue_type="access",
+                priority="high",
+                confidence=0.9,
+                missing_info=[],
+                clarifying_questions=[],
+                summary="Password reset request",
+                source="email",
+                sender="test@example.com",
+                raw_text="Subject: Password reset\n\nBody: I need to reset my password",
+            )
+        )
+        mock_get_llm.return_value = mock_llm
+
+        from helpdesk_agent.main import create_app
+
         self.app = create_app()
         self.client = TestClient(self.app)
+
+    def tearDown(self) -> None:
+        self.mock_patcher.stop()
 
     def test_chat_creates_new_conversation(self) -> None:
         response = self.client.post(

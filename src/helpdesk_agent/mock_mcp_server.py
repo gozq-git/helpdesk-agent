@@ -4,7 +4,7 @@ import json
 import threading
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Dict, Any
+from typing import Any
 
 
 class MockMCPHandler(BaseHTTPRequestHandler):
@@ -24,14 +24,44 @@ class MockMCPHandler(BaseHTTPRequestHandler):
             arguments = params.get("arguments", {})
             wait_for_completion = params.get("wait_for_completion", True)
             action_id = f"action-{uuid.uuid4().hex[:8]}"
+
             if tool_name == "slack.post_approval":
                 status = "queued"
+                content = {"tool": tool_name, "arguments": arguments}
+            elif tool_name == "faq.search":
+                status = "completed"
+                # Return mock FAQ results for testing
+                content = {
+                    "tool": tool_name,
+                    "arguments": arguments,
+                    "results": [
+                        {
+                            "id": "faq-001",
+                            "title": "How to reset your password",
+                            "body": "To reset your password, go to Settings > Security > Reset Password. "
+                            "Follow the on-screen instructions.",
+                            "score": 0.95,
+                        },
+                        {
+                            "id": "faq-002",
+                            "title": "Troubleshooting login issues",
+                            "body": "If you cannot log in, try clearing your browser cache and cookies, "
+                            "or use incognito mode.",
+                            "score": 0.85,
+                        },
+                    ],
+                    "count": 2,
+                }
             else:
-                status = "queued" if (not wait_for_completion or tool_name.endswith("approval_request")) else "completed"
+                status = (
+                    "queued" if (not wait_for_completion or tool_name.endswith("approval_request")) else "completed"
+                )
+                content = {"tool": tool_name, "arguments": arguments}
+
             result = {
                 "status": status,
                 "action_id": action_id,
-                "content": {"tool": tool_name, "arguments": arguments},
+                "content": content,
             }
             response = {"jsonrpc": "2.0", "id": request.get("id"), "result": result}
             self._send_json(response)
@@ -49,7 +79,7 @@ class MockMCPHandler(BaseHTTPRequestHandler):
 
         self._send_json({"jsonrpc": "2.0", "id": request.get("id"), "error": {"message": "unsupported method"}})
 
-    def _send_json(self, payload: Dict[str, Any]) -> None:
+    def _send_json(self, payload: dict[str, Any]) -> None:
         body = json.dumps(payload).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json")

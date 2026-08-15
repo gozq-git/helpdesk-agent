@@ -1,59 +1,93 @@
-# Agent Template with Helpdesk/Triage Agent Scaffold
+# Helpdesk Agent
 
-This repository is based on the `agent-template` project and now includes a scaffolded Helpdesk/Triage Agent implementation for IT operations support.
+AI-powered helpdesk triage agent with email intake, LLM-based triage, FAQ resolution, and Jira ticket creation.
 
-## What is included
+## Architecture
 
-- A FastAPI-based template in `src/helpdesk_agent`
-- Helpdesk/Triage Agent scaffolding for email/Slack intake and Jira ticket creation
-- MCP proxy adapter and a mock MCP server for tool-call-style external integration
-- A triage parser for email and Slack incident text
-- Slack approval request flow and Jira ticket creation flow
-- Unit tests for the MCP adapter, workflow, triage parser, Slack approval flow, and Jira ticket flow
+The agent is organized into domain modules:
 
-## Run the application
-
-Install dependencies using the provided `pyproject.toml` and a Python 3.10+ interpreter inside a virtual environment.
-
-```powershell
-cd helpdesk-agent
-py -3.10 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -e .[dev]
+```
+src/helpdesk_agent/
+├── main.py                 # FastAPI app factory
+├── dependencies.py         # Dependency injection providers
+├── config.py               # Configuration (MCP, LLM, Triage)
+├── mcp.py                  # MCP proxy adapter (async, httpx)
+├── models.py               # WorkflowState model
+├── core/
+│   ├── workflow.py         # LangGraph workflow orchestrator
+│   └── cases.py            # CaseStore for parked cases
+└── modules/
+    ├── email/
+    │   ├── router.py       # POST /webhooks/email
+    │   ├── schema.py       # EmailWebhook, WebhookResponse
+    │   └── service.py      # GmailFlow (MCP)
+    ├── triage/
+    │   ├── schema.py       # TriageResult
+    │   └── llm.py          # LLM triage client (OpenAI)
+    ├── faq/
+    │   └── service.py      # FAQFlow (MCP)
+    ├── ticketing/
+    │   └── service.py      # JiraTicketFlow (MCP)
+    ├── approval/
+    │   └── service.py      # SlackApprovalFlow (MCP)
+    └── chat/
+        ├── router.py       # /chat, /conversations endpoints
+        ├── schema.py       # ChatMessage, ChatResponse
+        └── service.py      # ConversationStore
 ```
 
-Run the built-in FastAPI server from the activated virtual environment:
+## Workflow
 
-```powershell
-cd helpdesk-agent
-.\.venv\Scripts\Activate.ps1
-python -m helpdesk_agent.main
+The agent follows this flow for incoming emails:
+
+1. **Triage**: LLM analyzes the email and extracts service, issue type, priority, confidence
+2. **Clarification**: If confidence is low, sends a clarification email and parks the case
+3. **FAQ Check**: Searches FAQ repository for existing solutions
+4. **Resolution**: If FAQ match found, sends resolution email (no ticket created)
+5. **Ticketing**: If no FAQ match, creates Jira ticket
+6. **Approval**: If production-impacting, requests Slack approval
+7. **Notification**: Sends confirmation email to user
+
+## Configuration
+
+### Required
+
+- `HELPDESK_AGENT_LLM_API_KEY` - OpenAI API key (required)
+
+### Optional
+
+- `HELPDESK_AGENT_LLM_MODEL` - LLM model (default: `gpt-4o-mini`)
+- `HELPDESK_AGENT_LLM_BASE_URL` - Custom LLM endpoint
+- `HELPDESK_AGENT_TRIAGE_CONFIDENCE_THRESHOLD` - Confidence threshold for clarification (default: `0.6`)
+- `HELPDESK_AGENT_FAQ_RELEVANCE_THRESHOLD` - FAQ relevance threshold (default: `0.7`)
+
+### MCP Integration
+
+- `HELPDESK_AGENT_USE_MCP` - Enable MCP adapter (default: `0`)
+- `HELPDESK_AGENT_MCP_BASE_URL` - MCP endpoint URL
+- `HELPDESK_AGENT_MCP_TIMEOUT_SECONDS` - Request timeout (default: `5.0`)
+- `HELPDESK_AGENT_MCP_AUTH_TOKEN` - Bearer token for MCP endpoint
+
+## MCP Tools
+
+The agent uses these MCP tools:
+
+- `gmail.send_email` - Send emails
+- `gmail.get_messages` - Retrieve messages
+- `gmail.reply_to_email` - Reply to emails
+- `jira.create_issue` - Create tickets
+- `slack.post_approval` - Request approvals
+- `faq.search` - Search FAQ repository
+
+## API Endpoints
+
+### Email Webhook
+
+```
+POST /webhooks/email
 ```
 
-If you want the app to use the MCP adapter for Slack/Jira/Gmail integration, set:
-
-```powershell
-$Env:HELPDESK_AGENT_USE_MCP = '1'
-$Env:HELPDESK_AGENT_MCP_BASE_URL = 'https://<your-mcp-endpoint>/mcp'
-$Env:HELPDESK_AGENT_MCP_TIMEOUT_SECONDS = '10'
-$Env:HELPDESK_AGENT_MCP_AUTH_TOKEN = '<your-mcp-bearer-token>'
-python -m helpdesk_agent.main
-```
-
-The adapter will send JSON-RPC tool calls to your configured MCP endpoint for:
-- `jira.create_issue` - Create tickets in Jira
-- `slack.post_approval` - Post approval requests to Slack
-- `gmail.send_email` - Send emails via Gmail
-- `gmail.get_messages` - Retrieve messages from Gmail
-- `gmail.reply_to_email` - Reply to existing emails
-
-Include an optional `Authorization: Bearer` header when `HELPDESK_AGENT_MCP_AUTH_TOKEN` is provided.
-
-## Email webhook
-
-The agent exposes an email webhook at `/webhooks/email`. POST JSON like:
-
+Request:
 ```json
 {
   "sender": "alice@example.com",
@@ -66,71 +100,75 @@ The agent exposes an email webhook at `/webhooks/email`. POST JSON like:
 }
 ```
 
-The webhook normalizes the email request, runs the Helpdesk/Triage workflow, and returns the generated case state including ticket metadata.
+### Chat
 
-## Chat API
-
-Interact with the helpdesk agent conversationally via the `/chat` endpoint.
-
-### Start a conversation
-
-```bash
-curl -X POST http://localhost:8080/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message": "I need help resetting my password"}'
+```
+POST /chat
 ```
 
-Response:
+Request:
 ```json
 {
-  "conversation_id": "a1b2c3d4",
-  "agent_response": "Case chat-a1b2c3d4 created...",
-  "case_id": "chat-a1b2c3d4",
-  "metadata": {
-    "current_step": "investigate",
-    "ticket_id": "JIRA-..."
-  }
+  "message": "I need help resetting my password",
+  "conversation_id": "optional-existing-id"
 }
 ```
 
-### Continue a conversation
+### Conversations
+
+- `GET /conversations/{id}` - Get conversation
+- `GET /conversations` - List all conversations
+- `DELETE /conversations/{id}` - Delete conversation
+
+## Running
+
+### Development
 
 ```bash
-curl -X POST http://localhost:8080/chat \
-  -H "Content-Type: application/json" \
-  -d '{
-    "message": "I tried but the reset link expired",
-    "conversation_id": "a1b2c3d4"
-  }'
+# Install dependencies
+uv sync
+
+# Set required environment variable
+export HELPDESK_AGENT_LLM_API_KEY=your-api-key
+
+# Run the server
+uv run python -m helpdesk_agent.main
 ```
 
-### Retrieve conversation history
+### Docker
 
 ```bash
-curl http://localhost:8080/conversations/a1b2c3d4
+# Build
+docker build -t helpdesk-agent:local .
+
+# Run
+docker run -p 8080:8080 -e HELPDESK_AGENT_LLM_API_KEY=your-api-key helpdesk-agent:local
 ```
 
-### List all conversations
+## Testing
 
 ```bash
-curl http://localhost:8080/conversations
+# Run all tests
+uv run pytest
+
+# Run with coverage
+uv run pytest --cov=src
+
+# Run lint
+uv run ruff check .
+
+# Run typecheck
+uv run mypy
 ```
 
-### Delete a conversation
+## Error Handling
 
-```bash
-curl -X DELETE http://localhost:8080/conversations/a1b2c3d4
-```
+The agent follows a fail-fast policy:
 
-## Run tests
+- Missing LLM API key → Startup error
+- LLM call failure → HTTP 502
+- MCP tool failure → HTTP 502
 
-```powershell
-cd helpdesk-agent
-.\.venv\Scripts\Activate.ps1
-$env:PYTHONPATH='src'
-python -m unittest tests.test_mcp tests.test_config tests.test_workflow tests.test_triage tests.test_slack_flow tests.test_ticketing tests.test_gmail_flow tests.test_chat tests.test_chat_endpoint
-```
+## License
 
-## Notes
-
-The repository includes a simple prototype for the Helpdesk/Triage Agent and can be extended with real Slack/Jira/Prometheus integrations via the MCP adapter.
+MIT

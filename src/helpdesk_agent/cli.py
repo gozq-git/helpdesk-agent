@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import argparse
-from typing import Any, Dict
+import asyncio
 
-from .workflow import HelpdeskWorkflow
+from .core.workflow import HelpdeskWorkflow
 
 
 def main() -> None:
@@ -17,15 +17,17 @@ def main() -> None:
     args = parser.parse_args()
 
     workflow = HelpdeskWorkflow()
-    state = workflow.run(
-        {
-            "case_id": args.case_id,
-            "summary": args.summary,
-            "source": args.source,
-            "sender": args.sender,
-            "service": args.service,
-            "metadata": {"requires_approval": args.requires_approval},
-        }
+    state = asyncio.run(
+        workflow.run(
+            {
+                "case_id": args.case_id,
+                "summary": args.summary,
+                "source": args.source,
+                "sender": args.sender,
+                "service": args.service,
+                "metadata": {"requires_approval": args.requires_approval},
+            }
+        )
     )
     print(state.to_dict())
 

@@ -1,24 +1,24 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
-from .mcp import MCPProxyAdapter, MCPResponse
+from ...mcp import MCPProxyAdapter, MCPResponse
 
 
 class GmailFlow:
     """Handle email send/receive operations via Gmail MCP."""
 
-    def __init__(self, mcp_adapter: Optional[MCPProxyAdapter] = None) -> None:
+    def __init__(self, mcp_adapter: MCPProxyAdapter | None = None) -> None:
         self.mcp_adapter = mcp_adapter
 
-    def send_email(
+    async def send_email(
         self,
         to: str,
         subject: str,
         body: str,
-        html_body: Optional[str] = None,
-        reply_to: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        html_body: str | None = None,
+        reply_to: str | None = None,
+    ) -> dict[str, Any]:
         """Send an email via Gmail MCP."""
         if self.mcp_adapter is None:
             return {
@@ -27,7 +27,7 @@ class GmailFlow:
                 "timestamp": "2024-01-01T00:00:00Z",
             }
 
-        response: MCPResponse = self.mcp_adapter.call_tool(
+        response: MCPResponse = await self.mcp_adapter.call_tool(
             "gmail.send_email",
             {
                 "to": to,
@@ -51,11 +51,11 @@ class GmailFlow:
             "action_id": response.action_id,
         }
 
-    def get_messages(
+    async def get_messages(
         self,
         query: str = "is:unread",
         max_results: int = 10,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Fetch messages from Gmail via MCP."""
         if self.mcp_adapter is None:
             return {
@@ -64,7 +64,7 @@ class GmailFlow:
                 "count": 0,
             }
 
-        response: MCPResponse = self.mcp_adapter.call_tool(
+        response: MCPResponse = await self.mcp_adapter.call_tool(
             "gmail.get_messages",
             {
                 "query": query,
@@ -83,12 +83,12 @@ class GmailFlow:
             "action_id": response.action_id,
         }
 
-    def reply_to_email(
+    async def reply_to_email(
         self,
         message_id: str,
         body: str,
-        html_body: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        html_body: str | None = None,
+    ) -> dict[str, Any]:
         """Reply to an email via Gmail MCP."""
         if self.mcp_adapter is None:
             return {
@@ -97,7 +97,7 @@ class GmailFlow:
                 "timestamp": "2024-01-01T00:00:00Z",
             }
 
-        response: MCPResponse = self.mcp_adapter.call_tool(
+        response: MCPResponse = await self.mcp_adapter.call_tool(
             "gmail.reply_to_email",
             {
                 "message_id": message_id,

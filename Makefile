@@ -19,4 +19,4 @@ build:
 	uv build --no-build-isolation
 
 docker-build:
-	docker build -t agent-template:local .
+	docker build -t helpdesk-agent:local .

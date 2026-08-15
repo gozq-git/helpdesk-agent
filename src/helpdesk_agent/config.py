@@ -24,3 +24,37 @@ class MCPConfig:
             auth_token=auth_token,
             headers=headers,
         )
+
+
+@dataclass
+class LLMConfig:
+    """Configuration for LLM client."""
+
+    api_key: str | None = None
+    model: str = "gpt-4o-mini"
+    base_url: str | None = None
+    timeout_seconds: float = 30.0
+
+    @classmethod
+    def from_env(cls) -> "LLMConfig":
+        return cls(
+            api_key=os.getenv("HELPDESK_AGENT_LLM_API_KEY"),
+            model=os.getenv("HELPDESK_AGENT_LLM_MODEL", "gpt-4o-mini"),
+            base_url=os.getenv("HELPDESK_AGENT_LLM_BASE_URL"),
+            timeout_seconds=float(os.getenv("HELPDESK_AGENT_LLM_TIMEOUT_SECONDS", "30.0")),
+        )
+
+
+@dataclass
+class TriageConfig:
+    """Configuration for triage behavior."""
+
+    confidence_threshold: float = 0.6
+    faq_relevance_threshold: float = 0.7
+
+    @classmethod
+    def from_env(cls) -> "TriageConfig":
+        return cls(
+            confidence_threshold=float(os.getenv("HELPDESK_AGENT_TRIAGE_CONFIDENCE_THRESHOLD", "0.6")),
+            faq_relevance_threshold=float(os.getenv("HELPDESK_AGENT_FAQ_RELEVANCE_THRESHOLD", "0.7")),
+        )

@@ -1,19 +1,19 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
 
 class Conversation:
     """Store a multi-turn conversation with the helpdesk agent."""
 
-    def __init__(self, conversation_id: Optional[str] = None) -> None:
+    def __init__(self, conversation_id: str | None = None) -> None:
         self.conversation_id = conversation_id or str(uuid4().hex[:8])
-        self.messages: List[Dict[str, Any]] = []
+        self.messages: list[dict[str, Any]] = []
         self.created_at = datetime.utcnow().isoformat()
         self.updated_at = datetime.utcnow().isoformat()
-        self.context: Dict[str, Any] = {}
+        self.context: dict[str, Any] = {}
 
     def add_user_message(self, content: str) -> None:
         self.messages.append(
@@ -25,7 +25,7 @@ class Conversation:
         )
         self.updated_at = datetime.utcnow().isoformat()
 
-    def add_agent_message(self, content: str, metadata: Optional[Dict[str, Any]] = None) -> None:
+    def add_agent_message(self, content: str, metadata: dict[str, Any] | None = None) -> None:
         self.messages.append(
             {
                 "role": "agent",
@@ -36,10 +36,10 @@ class Conversation:
         )
         self.updated_at = datetime.utcnow().isoformat()
 
-    def get_history(self) -> List[Dict[str, Any]]:
+    def get_history(self) -> list[dict[str, Any]]:
         return self.messages
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "conversation_id": self.conversation_id,
             "messages": self.messages,
@@ -53,17 +53,17 @@ class ConversationStore:
     """Simple in-memory store for conversations."""
 
     def __init__(self) -> None:
-        self.conversations: Dict[str, Conversation] = {}
+        self.conversations: dict[str, Conversation] = {}
 
-    def create(self, conversation_id: Optional[str] = None) -> Conversation:
+    def create(self, conversation_id: str | None = None) -> Conversation:
         conv = Conversation(conversation_id)
         self.conversations[conv.conversation_id] = conv
         return conv
 
-    def get(self, conversation_id: str) -> Optional[Conversation]:
+    def get(self, conversation_id: str) -> Conversation | None:
         return self.conversations.get(conversation_id)
 
-    def get_or_create(self, conversation_id: Optional[str] = None) -> Conversation:
+    def get_or_create(self, conversation_id: str | None = None) -> Conversation:
         if conversation_id and conversation_id in self.conversations:
             return self.conversations[conversation_id]
         return self.create(conversation_id)
@@ -74,5 +74,5 @@ class ConversationStore:
             return True
         return False
 
-    def list_all(self) -> List[Conversation]:
+    def list_all(self) -> list[Conversation]:
         return list(self.conversations.values())
