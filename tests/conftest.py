@@ -7,6 +7,21 @@ import pytest
 
 # Set a dummy API key for tests
 os.environ["HELPDESK_AGENT_LLM_API_KEY"] = "test-api-key"
+# Default to MCP disabled so webhook/chat tests get mocked flows unless a
+# test explicitly enables it (e.g. test_mcp.py sets it before importing).
+os.environ.setdefault("HELPDESK_AGENT_USE_MCP", "0")
+
+
+@pytest.fixture(autouse=True)
+def _reset_dependency_caches():
+    """Clear lru_cached dependencies so env/config changes are picked up."""
+    from helpdesk_agent import dependencies
+
+    dependencies.get_mcp_config.cache_clear()
+    dependencies.get_mcp_adapter.cache_clear()
+    yield
+    dependencies.get_mcp_config.cache_clear()
+    dependencies.get_mcp_adapter.cache_clear()
 
 
 @pytest.fixture

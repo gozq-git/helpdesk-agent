@@ -14,6 +14,11 @@ class MCPConfig:
     enable_async: bool = False
     auth_token: str | None = None
     headers: dict[str, str] = field(default_factory=dict)
+    # Optional URL of the real mcp-atlassian server. When set, jira.* and
+    # confluence.* tools are routed there; everything else uses base_url.
+    atlassian_url: str | None = None
+    # Jira project key used when creating issues via mcp-atlassian.
+    jira_project_key: str = "HELP"
 
     @classmethod
     def from_env(cls) -> "MCPConfig":
@@ -28,6 +33,8 @@ class MCPConfig:
             enable_async=os.getenv("HELPDESK_AGENT_MCP_ENABLE_ASYNC", "0") == "1",
             auth_token=auth_token,
             headers=headers,
+            atlassian_url=os.getenv("HELPDESK_AGENT_MCP_ATLASSIAN_URL") or None,
+            jira_project_key=os.getenv("HELPDESK_AGENT_JIRA_PROJECT_KEY", "HELP"),
         )
 
 

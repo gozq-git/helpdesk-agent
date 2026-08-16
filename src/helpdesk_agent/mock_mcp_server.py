@@ -1,107 +1,135 @@
 from __future__ import annotations
 
-import json
-import threading
 import uuid
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+import uvicorn
+from fastmcp import FastMCP
 
-class MockMCPHandler(BaseHTTPRequestHandler):
-    def do_POST(self) -> None:  # noqa: N802
-        if self.path != "/mcp":
-            self.send_error(404)
-            return
 
-        length = int(self.headers.get("Content-Length", "0"))
-        payload = self.rfile.read(length).decode("utf-8")
-        request = json.loads(payload)
-        method = request.get("method")
-        params = request.get("params", {})
+def _build_server() -> FastMCP:
+    """Create a mock MCP server that mirrors the old JSON-RPC mock's behavior."""
+    mcp = FastMCP("helpdesk-mock-mcp")
 
-        if method == "tools/call":
-            tool_name = params.get("name", "unknown")
-            arguments = params.get("arguments", {})
-            wait_for_completion = params.get("wait_for_completion", True)
-            action_id = f"action-{uuid.uuid4().hex[:8]}"
+    @mcp.tool(name="slack.post_approval")
+    def slack_post_approval(arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+        return {
+            "status": "queued",
+            "action_id": f"action-{uuid.uuid4().hex[:8]}",
+            "content": {"tool": "slack.post_approval", "arguments": arguments or {}},
+        }
 
-            if tool_name == "slack.post_approval":
-                status = "queued"
-                content = {"tool": tool_name, "arguments": arguments}
-            elif tool_name == "faq.search":
-                status = "completed"
-                # Return mock FAQ results for testing
-                content = {
-                    "tool": tool_name,
-                    "arguments": arguments,
-                    "results": [
-                        {
-                            "id": "faq-001",
-                            "title": "How to reset your password",
-                            "body": "To reset your password, go to Settings > Security > Reset Password. "
-                            "Follow the on-screen instructions.",
-                            "score": 0.95,
-                        },
-                        {
-                            "id": "faq-002",
-                            "title": "Troubleshooting login issues",
-                            "body": "If you cannot log in, try clearing your browser cache and cookies, "
-                            "or use incognito mode.",
-                            "score": 0.85,
-                        },
-                    ],
-                    "count": 2,
-                }
-            else:
-                status = (
-                    "queued" if (not wait_for_completion or tool_name.endswith("approval_request")) else "completed"
-                )
-                content = {"tool": tool_name, "arguments": arguments}
+    @mcp.tool(name="faq.search")
+    def faq_search(arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+        return {
+            "status": "completed",
+            "action_id": f"action-{uuid.uuid4().hex[:8]}",
+            "content": {
+                "tool": "faq.search",
+                "arguments": arguments or {},
+                "results": [
+                    {
+                        "id": "faq-001",
+                        "title": "How to reset your password",
+                        "body": "To reset your password, go to Settings > Security > Reset Password. "
+                        "Follow the on-screen instructions.",
+                        "score": 0.95,
+                    },
+                    {
+                        "id": "faq-002",
+                        "title": "Troubleshooting login issues",
+                        "body": "If you cannot log in, try clearing your browser cache and cookies, "
+                        "or use incognito mode.",
+                        "score": 0.85,
+                    },
+                ],
+                "count": 2,
+            },
+        }
 
-            result = {
-                "status": status,
-                "action_id": action_id,
-                "content": content,
-            }
-            response = {"jsonrpc": "2.0", "id": request.get("id"), "result": result}
-            self._send_json(response)
-            return
+    @mcp.tool(name="actions/get")
+    def actions_get(action_id: str) -> dict[str, Any]:
+        return {
+            "status": "completed",
+            "action_id": action_id,
+            "content": {"observed": True},
+        }
 
-        if method == "actions/get":
-            action_id = params.get("action_id")
-            response = {
-                "jsonrpc": "2.0",
-                "id": request.get("id"),
-                "result": {"status": "completed", "action_id": action_id, "content": {"observed": True}},
-            }
-            self._send_json(response)
-            return
+    @mcp.tool(name="slack.approval_request")
+    def slack_approval_request(arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+        return {
+            "status": "completed",
+            "action_id": f"action-{uuid.uuid4().hex[:8]}",
+            "content": {"tool": "slack.approval_request", "arguments": arguments or {}},
+        }
 
-        self._send_json({"jsonrpc": "2.0", "id": request.get("id"), "error": {"message": "unsupported method"}})
+    @mcp.tool(name="gmail.send_email")
+    def gmail_send_email(arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+        return {
+            "status": "completed",
+            "action_id": f"action-{uuid.uuid4().hex[:8]}",
+            "content": {"tool": "gmail.send_email", "arguments": arguments or {}, "message_id": f"msg-{uuid.uuid4().hex[:8]}"},
+        }
 
-    def _send_json(self, payload: dict[str, Any]) -> None:
-        body = json.dumps(payload).encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+    @mcp.tool(name="gmail.get_messages")
+    def gmail_get_messages(arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+        return {
+            "status": "completed",
+            "action_id": f"action-{uuid.uuid4().hex[:8]}",
+            "content": {
+                "tool": "gmail.get_messages",
+                "arguments": arguments or {},
+                "messages": [],
+                "count": 0,
+            },
+        }
 
-    def log_message(self, format: str, *args: Any) -> None:  # noqa: A003
-        return
+    @mcp.tool(name="jira.create_issue")
+    def jira_create_issue(arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+        return {
+            "status": "completed",
+            "action_id": f"action-{uuid.uuid4().hex[:8]}",
+            "content": {"tool": "jira.create_issue", "arguments": arguments or {}},
+        }
+
+    @mcp.tool()
+    def generic_tool(arguments: dict[str, Any] | None = None) -> dict[str, Any]:  # pragma: no cover - fallback
+        return {
+            "status": "completed",
+            "action_id": f"action-{uuid.uuid4().hex[:8]}",
+            "content": {"tool": "generic_tool", "arguments": arguments or {}},
+        }
+
+    return mcp
 
 
 class MockMCPServer:
+    """Run the mock MCP server in a background thread over streamable-http."""
+
     def __init__(self, host: str = "127.0.0.1", port: int = 8765) -> None:
         self.host = host
         self.port = port
-        self.httpd = ThreadingHTTPServer((host, port), MockMCPHandler)
-        self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+        self._mcp = _build_server()
+        app = self._mcp.http_app(path="/mcp", transport="streamable-http")
+        self._server = uvicorn.Server(
+            uvicorn.Config(app, host=host, port=port, log_level="error")
+        )
+        import threading
+
+        self._thread = threading.Thread(target=self._server.run, daemon=True)
 
     def start(self) -> None:
-        self.thread.start()
+        import threading
+        import time
+
+        self._thread.start()
+        # Wait until the server is accepting connections
+        deadline = time.time() + 10
+        while not self._server.started:
+            if time.time() > deadline:
+                raise RuntimeError("Mock MCP server failed to start")
+            time.sleep(0.05)
 
     def stop(self) -> None:
-        self.httpd.shutdown()
-        self.httpd.server_close()
-        self.thread.join(timeout=5)
+        self._server.should_exit = True
+        self._thread.join(timeout=5)

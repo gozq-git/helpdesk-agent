@@ -43,11 +43,21 @@ class JiraTicketFlow:
         if response.status != "completed":
             return {"status": "failed", "action_id": response.action_id, "error": response.error}
 
-        ticket_id = response.content.get("arguments", {}).get("case_id", f"JIRA-{case_id}")
+        # Real mcp-atlassian returns the created issue (key, e.g. "HELP-123");
+        # the mock returns legacy content.arguments.case_id.
+        ticket_id = (
+            response.content.get("key")
+            or response.content.get("issue_key")
+            or response.content.get("arguments", {}).get("case_id")
+            or f"JIRA-{case_id}"
+        )
+        ticket_url = response.content.get("url") or response.content.get(
+            "browse_url", f"https://jira.example.com/browse/{ticket_id}"
+        )
         ticket_info: dict[str, Any] = {
             "status": "created",
             "ticket_id": ticket_id,
-            "ticket_url": f"https://jira.example.com/browse/{ticket_id}",
+            "ticket_url": ticket_url,
             "action_id": response.action_id,
         }
         return ticket_info
