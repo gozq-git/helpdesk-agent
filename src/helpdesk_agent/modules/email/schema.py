@@ -12,26 +12,35 @@ class _HTMLTextExtractor(HTMLParser):
     """Minimal HTML-to-text extractor using only the stdlib."""
 
     _BLOCK_TAGS = {"br", "div", "p", "tr", "li"}
+    _SKIP_TAGS = {"style", "script"}
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self._chunks: list[str] = []
+        self._skip_depth = 0
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag in self._BLOCK_TAGS:
+        if tag in self._SKIP_TAGS:
+            self._skip_depth += 1
+        elif self._skip_depth == 0 and tag in self._BLOCK_TAGS:
             self._chunks.append("\n")
 
     def handle_endtag(self, tag: str) -> None:
-        if tag in self._BLOCK_TAGS:
+        if tag in self._SKIP_TAGS:
+            self._skip_depth = max(0, self._skip_depth - 1)
+        elif self._skip_depth == 0 and tag in self._BLOCK_TAGS:
             self._chunks.append("\n")
 
     def handle_data(self, data: str) -> None:
-        self._chunks.append(data)
+        if self._skip_depth == 0:
+            self._chunks.append(data)
 
     def get_text(self) -> str:
         text = "".join(self._chunks)
         text = re.sub(r"[ \t]+", " ", text)
+        # Preserve paragraph breaks, then unwrap lone newlines (visual wraps) into spaces.
         text = re.sub(r"\n\s*\n+", "\n\n", text)
+        text = re.sub(r"(?<!\n)\n(?!\n)", " ", text)
         return text.strip()
 
 
