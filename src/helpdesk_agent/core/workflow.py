@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, TypedDict
 
 from langgraph.graph import END, StateGraph
@@ -12,6 +13,8 @@ from ..modules.faq.service import FAQFlow
 from ..modules.ticketing.service import JiraTicketFlow
 from ..modules.triage.llm import LLMError, LLMTriageClient
 from ..modules.triage.schema import TriageResult
+
+logger = logging.getLogger(__name__)
 
 
 class GraphState(TypedDict):
@@ -38,6 +41,10 @@ class HelpdeskWorkflow:
         self.ticket_flow = JiraTicketFlow(mcp_adapter)
         self.faq_flow = FAQFlow(mcp_adapter)
         self.graph = self._build_graph()
+        logger.info(
+            "HelpdeskWorkflow initialized: mcp=%s",
+            "enabled" if mcp_adapter else "disabled (mocked)",
+        )
 
     def _build_graph(self) -> Any:
         """Build the LangGraph state graph."""
@@ -95,6 +102,9 @@ class HelpdeskWorkflow:
         """Perform LLM triage on the input."""
         workflow_state = state["workflow_state"]
         initial_input = state["initial_input"]
+        case_id = workflow_state.case_id
+
+        logger.info("case=%s stage=triage status=started", case_id)
 
         # Extract subject and body
         summary_text = initial_input.get("summary", "No summary provided")
@@ -126,8 +136,20 @@ class HelpdeskWorkflow:
                 f"Classified as {triage_result.issue_type} with priority {triage_result.priority} "
                 f"(confidence: {triage_result.confidence:.2f})",
             )
+            logger.info(
+                "case=%s stage=triage status=completed service=%s issue_type=%s "
+                "priority=%s confidence=%.2f missing_info=%d clarifying_questions=%d",
+                case_id,
+                triage_result.service,
+                triage_result.issue_type,
+                triage_result.priority,
+                triage_result.confidence,
+                len(triage_result.missing_info),
+                len(triage_result.clarifying_questions),
+            )
         except LLMError as e:
             workflow_state.record_history("triage", "failed", f"LLM triage failed: {e}")
+            logger.error("case=%s stage=triage status=failed error=%s", case_id, e)
             raise
 
         return state
@@ -139,19 +161,48 @@ class HelpdeskWorkflow:
 
     def _should_clarify(self, state: GraphState) -> str:
         """Determine if clarification is needed."""
+        case_id = state["workflow_state"].case_id
         triage_result = state.get("triage_result")
         if not triage_result:
+            logger.info("case=%s gate=clarification decision=faq_gate reason=no_triage_result", case_id)
             return "faq_gate"
 
         # Check if we should skip clarification (e.g., already asked once)
         initial_input = state["initial_input"]
         if initial_input.get("metadata", {}).get("skip_clarification"):
+            logger.info("case=%s gate=clarification decision=faq_gate reason=skip_clarification", case_id)
             return "faq_gate"
 
         # Check confidence threshold
         threshold = 0.6  # TODO: Get from config
+        high_confidence_threshold = 0.8  # TODO: Get from config
+        # High-confidence results skip clarification even if missing_info is present
+        if triage_result.confidence >= high_confidence_threshold:
+            logger.info(
+                "case=%s gate=clarification decision=faq_gate reason=high_confidence "
+                "confidence=%.2f high_confidence_threshold=%.2f missing_info=%d",
+                case_id,
+                triage_result.confidence,
+                high_confidence_threshold,
+                len(triage_result.missing_info),
+            )
+            return "faq_gate"
         if triage_result.confidence < threshold or triage_result.missing_info:
+            logger.info(
+                "case=%s gate=clarification decision=clarify reason=needs_clarification "
+                "confidence=%.2f threshold=%.2f missing_info=%d",
+                case_id,
+                triage_result.confidence,
+                threshold,
+                len(triage_result.missing_info),
+            )
             return "clarify"
+        logger.info(
+            "case=%s gate=clarification decision=faq_gate reason=confident confidence=%.2f threshold=%.2f",
+            case_id,
+            triage_result.confidence,
+            threshold,
+        )
         return "faq_gate"
 
     async def _clarify_node(self, state: GraphState) -> GraphState:
@@ -159,9 +210,13 @@ class HelpdeskWorkflow:
         workflow_state = state["workflow_state"]
         triage_result = state.get("triage_result")
         initial_input = state["initial_input"]
+        case_id = workflow_state.case_id
+
+        logger.info("case=%s stage=clarify status=started", case_id)
 
         if triage_result is None:
             workflow_state.record_history("clarify", "failed", "No triage result available")
+            logger.error("case=%s stage=clarify status=failed error=no_triage_result", case_id)
             return state
 
         # Draft clarification email
@@ -181,6 +236,14 @@ class HelpdeskWorkflow:
                 email_result.get("status", "failed"),
                 f"Clarification email sent: {email_result.get('message_id', 'unknown')}",
             )
+            logger.info(
+                "case=%s stage=clarify email_status=%s message_id=%s",
+                case_id,
+                email_result.get("status", "failed"),
+                email_result.get("message_id", email_result.get("error", "unknown")),
+            )
+        else:
+            logger.info("case=%s stage=clarify note=no_reply_to_email_not_sent", case_id)
 
         workflow_state.current_step = "awaiting_clarification"
         workflow_state.clarification = {
@@ -194,9 +257,13 @@ class HelpdeskWorkflow:
         """Check FAQ for existing solution."""
         workflow_state = state["workflow_state"]
         triage_result = state.get("triage_result")
+        case_id = workflow_state.case_id
+
+        logger.info("case=%s stage=faq_gate status=started", case_id)
 
         if triage_result is None:
             workflow_state.record_history("faq_gate", "failed", "No triage result available")
+            logger.error("case=%s stage=faq_gate status=failed error=no_triage_result", case_id)
             return state
 
         workflow_state.record_history("faq_gate", "started", "Searching FAQ repository")
@@ -212,28 +279,53 @@ class HelpdeskWorkflow:
                 "completed",
                 f"Found {faq_results.get('count', 0)} FAQ matches",
             )
+            logger.info(
+                "case=%s stage=faq_gate status=completed matches=%d",
+                case_id,
+                faq_results.get("count", 0),
+            )
         else:
             workflow_state.record_history(
                 "faq_gate", "failed", f"FAQ search failed: {faq_results.get('error', 'unknown')}"
+            )
+            logger.warning(
+                "case=%s stage=faq_gate status=failed error=%s",
+                case_id,
+                faq_results.get("error", "unknown"),
             )
 
         return state
 
     def _should_resolve_faq(self, state: GraphState) -> str:
         """Determine if FAQ solution should be used."""
+        case_id = state["workflow_state"].case_id
         faq_results = state.get("faq_results") or {}
         if faq_results.get("status") != "success":
+            logger.info("case=%s gate=faq decision=ticket reason=faq_search_failed", case_id)
             return "ticket"
 
         results = faq_results.get("results", [])
         if not results:
+            logger.info("case=%s gate=faq decision=ticket reason=no_faq_matches", case_id)
             return "ticket"
 
         # Check relevance threshold
         threshold = 0.7  # TODO: Get from config
         top_result = results[0]
         if top_result.get("score", 0) >= threshold:
+            logger.info(
+                "case=%s gate=faq decision=resolve_faq reason=relevant_match score=%.3f threshold=%.2f",
+                case_id,
+                top_result.get("score", 0),
+                threshold,
+            )
             return "resolve_faq"
+        logger.info(
+            "case=%s gate=faq decision=ticket reason=below_threshold score=%.3f threshold=%.2f",
+            case_id,
+            top_result.get("score", 0),
+            threshold,
+        )
         return "ticket"
 
     async def _resolve_faq_node(self, state: GraphState) -> GraphState:
@@ -241,9 +333,13 @@ class HelpdeskWorkflow:
         workflow_state = state["workflow_state"]
         faq_results = state.get("faq_results")
         initial_input = state["initial_input"]
+        case_id = workflow_state.case_id
+
+        logger.info("case=%s stage=resolve_faq status=started", case_id)
 
         if faq_results is None or not faq_results.get("results"):
             workflow_state.record_history("resolve_faq", "failed", "No FAQ results available")
+            logger.error("case=%s stage=resolve_faq status=failed error=no_faq_results", case_id)
             return state
 
         top_result = faq_results["results"][0]
@@ -265,8 +361,15 @@ class HelpdeskWorkflow:
                 email_result.get("status", "failed"),
                 f"Resolution email sent: {email_result.get('message_id', 'unknown')}",
             )
+            logger.info(
+                "case=%s stage=resolve_faq email_status=%s message_id=%s",
+                case_id,
+                email_result.get("status", "failed"),
+                email_result.get("message_id", email_result.get("error", "unknown")),
+            )
 
         workflow_state.current_step = "resolved_faq"
+        logger.info("case=%s stage=resolve_faq status=completed", case_id)
         return state
 
     async def _ticket_node(self, state: GraphState) -> GraphState:
@@ -274,9 +377,13 @@ class HelpdeskWorkflow:
         workflow_state = state["workflow_state"]
         triage_result = state.get("triage_result")
         initial_input = state["initial_input"]
+        case_id = workflow_state.case_id
+
+        logger.info("case=%s stage=ticket status=started", case_id)
 
         if triage_result is None:
             workflow_state.record_history("ticketing", "failed", "No triage result available")
+            logger.error("case=%s stage=ticket status=failed error=no_triage_result", case_id)
             return state
 
         ticket_result = await self.ticket_flow.create_ticket(
@@ -293,6 +400,12 @@ class HelpdeskWorkflow:
             ticket_result.get("status", "failed"),
             f"Ticket creation: {ticket_result.get('ticket_id', ticket_result.get('error', 'unknown'))}",
         )
+        logger.info(
+            "case=%s stage=ticket status=%s ticket_id=%s",
+            case_id,
+            ticket_result.get("status", "failed"),
+            ticket_result.get("ticket_id", ticket_result.get("error", "unknown")),
+        )
         workflow_state.current_step = "investigate"
 
         return state
@@ -301,12 +414,17 @@ class HelpdeskWorkflow:
         """Check if approval is needed."""
         workflow_state = state["workflow_state"]
         if workflow_state.metadata.get("requires_approval"):
+            logger.info("case=%s gate=approval decision=approval reason=requires_approval", workflow_state.case_id)
             return "approval"
+        logger.info("case=%s gate=approval decision=notify reason=no_approval_required", workflow_state.case_id)
         return "notify"
 
     async def _approval_node(self, state: GraphState) -> GraphState:
         """Request approval for production-impacting changes."""
         workflow_state = state["workflow_state"]
+        case_id = workflow_state.case_id
+
+        logger.info("case=%s stage=approval status=started", case_id)
 
         approval_request = await self.slack_flow.request_approval(
             workflow_state.case_id,
@@ -330,6 +448,9 @@ class HelpdeskWorkflow:
         """Send notification email."""
         workflow_state = state["workflow_state"]
         initial_input = state["initial_input"]
+        case_id = workflow_state.case_id
+
+        logger.info("case=%s stage=notify status=started", case_id)
 
         workflow_state.record_history("investigate", "completed", "Investigation evidence collected")
         workflow_state.current_step = "remediate"
@@ -352,10 +473,17 @@ class HelpdeskWorkflow:
                 email_result.get("status", "failed"),
                 f"Follow-up email sent: {email_result.get('message_id', email_result.get('error', 'unknown'))}",
             )
+            logger.info(
+                "case=%s stage=notify email_status=%s message_id=%s",
+                case_id,
+                email_result.get("status", "failed"),
+                email_result.get("message_id", email_result.get("error", "unknown")),
+            )
 
         workflow_state.record_history("verify", "completed", "Verification checks passed")
         workflow_state.current_step = "closed"
         workflow_state.record_history("close", "completed", "Case closed and ticket updated")
+        logger.info("case=%s stage=notify status=completed current_step=closed", case_id)
 
         return state
 
@@ -388,11 +516,20 @@ class HelpdeskWorkflow:
             )
             workflow_state.add_message("user", initial_state.get("summary", ""))
 
+        case_id = workflow_state.case_id
+        logger.info(
+            "case=%s run=started source=%s resumed=%s",
+            case_id,
+            initial_state.get("source", "unknown"),
+            bool(resume_state),
+        )
+
         # Check if this is an email read request (bypasses triage)
         summary_text = initial_state.get("summary", "").lower()
         if any(keyword in summary_text for keyword in ["read", "get", "fetch", "retrieve", "show", "list"]) and any(
             keyword in summary_text for keyword in ["email", "mail", "message"]
         ):
+            logger.info("case=%s run=email_read bypassing triage", case_id)
             email_read_state: GraphState = {
                 "workflow_state": workflow_state,
                 "initial_input": initial_state,
@@ -413,7 +550,14 @@ class HelpdeskWorkflow:
 
         # Run the graph
         graph_result: GraphState = await self.graph.ainvoke(graph_state)
-        return graph_result["workflow_state"]
+        final_state = graph_result["workflow_state"]
+        logger.info(
+            "case=%s run=finished current_step=%s ticket=%s",
+            case_id,
+            final_state.current_step,
+            (final_state.ticket or {}).get("ticket_id", "none"),
+        )
+        return final_state
 
     def create_langgraph_plan(self) -> list[str]:
         return ["triage", "investigate", "remediate", "verify", "close"]
