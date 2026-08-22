@@ -175,18 +175,6 @@ class HelpdeskWorkflow:
 
         # Check confidence threshold
         threshold = 0.6  # TODO: Get from config
-        high_confidence_threshold = 0.8  # TODO: Get from config
-        # High-confidence results skip clarification even if missing_info is present
-        if triage_result.confidence >= high_confidence_threshold:
-            logger.info(
-                "case=%s gate=clarification decision=faq_gate reason=high_confidence "
-                "confidence=%.2f high_confidence_threshold=%.2f missing_info=%d",
-                case_id,
-                triage_result.confidence,
-                high_confidence_threshold,
-                len(triage_result.missing_info),
-            )
-            return "faq_gate"
         if triage_result.confidence < threshold or triage_result.missing_info:
             logger.info(
                 "case=%s gate=clarification decision=clarify reason=needs_clarification "

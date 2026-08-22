@@ -72,12 +72,12 @@ class EmailWebhook(BaseModel):
         if data.get("sender") and not data.get("from_name"):
             normalized["from_name"] = data["sender"]
 
-        # Body: prefer the summary, fall back to tag-stripped html.
-        summary = (data.get("summary") or "").strip()
-        if summary:
-            normalized["body"] = summary
-        elif data.get("html"):
+        # Body: prefer the full html (stripped to text); Zoho's `summary` is an
+        # auto-generated truncated preview, so only use it as a fallback.
+        if data.get("html"):
             normalized["body"] = _strip_html(data["html"])
+        elif (data.get("summary") or "").strip():
+            normalized["body"] = data["summary"].strip()
 
         if data.get("messageId") is not None:
             normalized["message_id"] = str(data["messageId"])
