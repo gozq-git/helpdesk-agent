@@ -99,3 +99,76 @@ def test_email_webhook_accepts_tool_field_names() -> None:
     assert payload["case_id"] == "https://mail.google.com/mail/u/0/#inbox/abc123"
 
     mock_patcher.stop()
+
+
+def test_email_webhook_accepts_zoho_payload() -> None:
+    """Accept a Zoho Mail webhook payload (fromAddress, summary, messageId, ...)."""
+    mock_patcher = patch("helpdesk_agent.dependencies.get_llm_client")
+    mock_get_llm = mock_patcher.start()
+
+    from helpdesk_agent.modules.triage.schema import TriageResult
+
+    mock_llm = MagicMock()
+    mock_llm.triage_email = AsyncMock(
+        return_value=TriageResult(
+            service="marketing",
+            issue_type="request",
+            priority="medium",
+            confidence=0.9,
+            missing_info=[],
+            clarifying_questions=[],
+            summary="Product pitch slide deck shared",
+            source="email",
+            sender="paula@zylker.com",
+            raw_text="Marketing - Product pitch",
+        )
+    )
+    mock_get_llm.return_value = mock_llm
+
+    from helpdesk_agent.main import create_app
+
+    client = TestClient(create_app())
+    response = client.post(
+        "/webhooks/email",
+        json={
+            "summary": "Hi Rebecca, I have shared the slide deck for our product pitch meeting "
+            "on Friday. Please take a look and do let me know if you have any suggestions. "
+            "Regards, Paula",
+            "sentDateInGMT": 1560866021000,
+            "subject": "Marketing - Product pitch",
+            "messageId": 1560840837125110000,
+            "toAddress": "\"Rebecca A\"<rebecca@zylker.com>",
+            "folderId": 3881227000000013000,
+            "zuid": 647772765,
+            "ccAddress": "",
+            "size": 55503,
+            "sender": "Paula",
+            "receivedTime": 1560840837126,
+            "fromAddress": "paula@zylker.com",
+            "html": (
+                '<meta /><div><div style="font-family:&quot;Trebuchet ms&quot;, Arial, '
+                "Helvetica, sans-serif;font-size:12pt;\"><div>Hi Rebecca,<br /></div>"
+                "<div><br /></div><div>I have shared the slide deck for our product pitch "
+                "meeting on Friday. Please take a look and do let me know if you have any "
+                'suggestions.<br /></div><div id=""><div><img src="/zm/ImageDisplay?f=1.png'
+                "&amp;mode=inline&amp;cid=0.28869215260.3894179596053002321.16b695cdb49__"
+                'inline__img__src&amp;" width="145" height="145" style="float:left;" /><br />'
+                "</div><div><br /></div><div><br /></div><div>Regards,<br /></div><div>Paula"
+                '<br /><br /></div></div><br /><br /><div style="clear:both;"></div></div>'
+                "<br /></div>"
+            ),
+            "IntegIdList": "34000000580271,",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ticket"]["status"] == "mocked"
+    # messageId (int) should be coerced to str and used as case_id
+    assert payload["case_id"] == "1560840837125110000"
+    # subject and summary-based body should reach triage
+    subject, body = mock_llm.triage_email.call_args.args
+    assert subject == "Marketing - Product pitch"
+    assert "slide deck" in body
+
+    mock_patcher.stop()
